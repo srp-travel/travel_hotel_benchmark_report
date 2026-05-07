@@ -23,7 +23,7 @@ Interface utilisateur pour comparer les tarifs hôteliers entre ORX et Booking.c
 ## Lancement
 
 ```bash
-streamlit run main.py
+streamlit run app.py
 ```
 
 ## Déploiement sur Streamlit Share
@@ -33,7 +33,7 @@ Ce projet est configuré pour être déployé sur [Streamlit Share](https://shar
 1. Poussez ce code sur un dépôt GitHub public.
 2. Allez sur https://share.streamlit.io/
 3. Connectez-vous avec votre compte GitHub.
-4. Sélectionnez ce dépôt et le fichier `main.py` comme point d'entrée.
+4. Sélectionnez ce dépôt (le fichier `app.py` sera automatiquement détecté comme point d'entrée).
 5. Cliquez sur "Deploy".
 
 ## Fonctionnalités
