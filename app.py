@@ -61,14 +61,6 @@ COL_WIDTHS = {
 
 PAGE_SIZES = [10, 25, 50, 100]
 
-# Noms de colonnes candidats pour le nom d'hotel dans l'export ORX
-HOTEL_COL_CANDIDATES = [
-    "Hôtel", "Hotel", "Nom hôtel", "Nom hotel",
-    "Nom de l'hôtel", "Nom de l'hotel",
-    "Etablissement", "Etablissement hôtelier",
-    "Libellé hôtel", "Libelle hotel",
-]
-
 
 # ══════════════════════════════════════════════════════════════
 # PAGE & CSS
@@ -135,14 +127,6 @@ def safe_unique(df, col):
     if col not in df.columns:
         return []
     return sorted(df[col].dropna().astype(str).str.strip().unique().tolist())
-
-
-def detect_hotel_col(df):
-    """Retourne le nom de la première colonne hotel trouvée dans df, ou None."""
-    for c in HOTEL_COL_CANDIDATES:
-        if c in df.columns:
-            return c
-    return None
 
 
 def normalize_price(val):
@@ -215,16 +199,14 @@ def kpi(label, value, cls=""):
 
 
 def render_paginated_table(df_display, df_full, page_key, page_size_key):
-    """Affiche un tableau filtrable et paginé."""
+    """Tableau filtrable et paginé. Prix affichés sans décimales."""
 
     # ── Filtres ──────────────────────────────────────────────
     fc1, fc2, fc3 = st.columns([2, 2, 2])
-
     with fc1:
         hide_na = st.checkbox(
             "Masquer les lignes sans comparaison BKG (N/A)",
-            value=False,
-            key="filter_hide_na",
+            value=False, key="filter_hide_na",
         )
     with fc2:
         hotel_options = ["Tous"] + sorted(df_display["Hotel"].dropna().unique().tolist()) \
@@ -260,7 +242,6 @@ def render_paginated_table(df_display, df_full, page_key, page_size_key):
         )
 
     n_pages = max(1, (n_rows - 1) // page_size + 1)
-
     if page_key not in st.session_state:
         st.session_state[page_key] = 0
     if st.session_state[page_key] >= n_pages:
@@ -295,13 +276,15 @@ def render_paginated_table(df_display, df_full, page_key, page_size_key):
         color = ROW_COLORS.get(comp, ("", ""))[1]
         return [f"background-color: {color}" if color else ""] * len(row)
 
+    # Prix affiches sans decimales
     st.dataframe(
         df_page.style.apply(style_row, axis=1).format(
             {
-                "Ecart PCT":          "{:.2%}",
-                "Ecart EUR":          "{:+,.2f}",
-                "Prix BKG (min)":     "{:,.2f}",
-                "Prix ORX / chambre": "{:,.2f}",
+                "Ecart PCT":          "{:.1%}",
+                "Ecart EUR":          "{:+,.0f}",
+                "Prix BKG (min)":     "{:,.0f}",
+                "Prix ORX / chambre": "{:,.0f}",
+                "Prix de vente TTC":  "{:,.0f}",
             },
             na_rep="—",
         ),
@@ -348,7 +331,8 @@ else:
         st.error(f"❌ Erreur de lecture : {e}")
 
     else:
-        hotel_col = detect_hotel_col(df_orx)
+        # Nom de l'hotel = 1ere colonne de la feuille BKG
+        bkg_hotel_col = df_bkg.columns[0]
 
         orx_categories     = safe_unique(df_orx, "Catégorie")
         orx_pensions_raw   = safe_unique(df_orx, "Pension")
@@ -359,10 +343,7 @@ else:
         c1, c2 = st.columns(2)
         c1.success(f"✅ ORX — {len(df_orx):,} lignes · {len(orx_categories)} catégorie(s) · {len(orx_pensions_raw)} libellé(s) pension")
         c2.success(f"✅ BKG — {len(df_bkg):,} lignes · {len(bkg_room_types)} type(s) de chambre · {len(bkg_cancel_raw)} politique(s) d'annulation")
-        if hotel_col:
-            st.caption(f"🏨 Colonne hôtel détectée : **{hotel_col}**")
-        else:
-            st.warning("⚠️ Colonne hôtel non détectée dans l'export ORX — la colonne 'Hotel' sera vide.")
+        st.caption(f"🏨 Colonne hôtel (BKG col. 1) : **{bkg_hotel_col}**")
         st.markdown("---")
 
         tab_params, tab_rooms, tab_pensions, tab_cancel, tab_report = st.tabs([
@@ -508,7 +489,6 @@ else:
                         nb_nuits    = orx_row.get("Nb nuits")
                         categorie   = str(orx_row.get("Catégorie", "")).strip()
                         pension_raw = str(orx_row.get("Pension", "")).strip()
-                        nom_hotel   = str(orx_row.get(hotel_col, "")).strip() if hotel_col else ""
 
                         try:
                             tw_label = date_dep.strftime("%d/%m/%Y") if date_dep else ""
@@ -523,6 +503,7 @@ else:
 
                         if not room_types:
                             n_no_map += 1
+                            nom_hotel = ""
                             bkg_room = bkg_meal = bkg_meal_norm = bkg_cancel_norm = "N/A"
                             prix_bkg = ecart_eur = ecart_pct = None
                             competitivite = "N/A"
@@ -533,17 +514,20 @@ else:
                             ]
                             if bkg_matches.empty:
                                 n_no_bkg += 1
+                                nom_hotel = ""
                                 bkg_room = bkg_meal = bkg_meal_norm = bkg_cancel_norm = "N/A"
                                 prix_bkg = ecart_eur = ecart_pct = None
                                 competitivite = "N/A"
                             else:
-                                cheapest           = bkg_matches.loc[bkg_matches["Price"].idxmin()]
-                                bkg_room           = str(cheapest.get("Room Type", ""))
-                                bkg_meal           = str(cheapest.get("Meal Plan", ""))
-                                bkg_meal_norm      = bkg_meal_rev.get(bkg_meal, f"Non mappé : {bkg_meal}")
+                                cheapest = bkg_matches.loc[bkg_matches["Price"].idxmin()]
+                                # Nom hotel depuis la 1ere colonne de la feuille BKG
+                                nom_hotel      = str(cheapest.get(bkg_hotel_col, "")).strip()
+                                bkg_room       = str(cheapest.get("Room Type", ""))
+                                bkg_meal       = str(cheapest.get("Meal Plan", ""))
+                                bkg_meal_norm  = bkg_meal_rev.get(bkg_meal, f"Non mappé : {bkg_meal}")
                                 bkg_cancel_raw_val = str(cheapest.get("Cancellation Policy", ""))
                                 bkg_cancel_norm    = bkg_cancel_rev.get(bkg_cancel_raw_val, f"Non mappé : {bkg_cancel_raw_val}")
-                                prix_bkg           = float(cheapest["Price"])
+                                prix_bkg       = float(cheapest["Price"])
                                 if prix_orx_chambre and prix_bkg:
                                     ecart_eur     = round(prix_orx_chambre - prix_bkg, 2)
                                     ecart_pct     = round((prix_orx_chambre - prix_bkg) / prix_bkg, 4)
@@ -606,10 +590,10 @@ else:
                     if not df_comp.empty:
                         def cls_e(v):
                             return "success" if v < 0 else "danger" if v > 0 else ""
-                        kpi("Ecart moyen (EUR)",   f"{df_comp['Ecart EUR'].mean():+,.2f} EUR", cls_e(df_comp['Ecart EUR'].mean()))
-                        kpi("Ecart moyen (%)",     f"{df_comp['Ecart PCT'].mean():+.2%}",      cls_e(df_comp['Ecart PCT'].mean()))
-                        kpi("Ecart maximum (EUR)", f"{df_comp['Ecart EUR'].max():+,.2f} EUR",  cls_e(df_comp['Ecart EUR'].max()))
-                        kpi("Ecart minimum (EUR)", f"{df_comp['Ecart EUR'].min():+,.2f} EUR",  cls_e(df_comp['Ecart EUR'].min()))
+                        kpi("Ecart moyen (EUR)",   f"{df_comp['Ecart EUR'].mean():+,.0f} EUR", cls_e(df_comp['Ecart EUR'].mean()))
+                        kpi("Ecart moyen (%)",     f"{df_comp['Ecart PCT'].mean():+.1%}",      cls_e(df_comp['Ecart PCT'].mean()))
+                        kpi("Ecart maximum (EUR)", f"{df_comp['Ecart EUR'].max():+,.0f} EUR",  cls_e(df_comp['Ecart EUR'].max()))
+                        kpi("Ecart minimum (EUR)", f"{df_comp['Ecart EUR'].min():+,.0f} EUR",  cls_e(df_comp['Ecart EUR'].min()))
                     else:
                         st.caption("Aucune comparaison disponible.")
 
@@ -714,10 +698,13 @@ else:
                             if is_nan:
                                 cell.value = None
                             elif h == "Ecart PCT" and isinstance(val, (int, float)):
-                                cell.value, cell.number_format = val, "0.00%"
+                                # Pourcentage avec 1 decimale
+                                cell.value, cell.number_format = val, "0.0%"
                                 cell.alignment = Alignment(horizontal="right")
-                            elif h in ("Ecart EUR", "Prix BKG (min)", "Prix ORX / chambre") and isinstance(val, (int, float)):
-                                cell.value, cell.number_format = val, '#,##0.00 "EUR"'
+                            elif h in ("Ecart EUR", "Prix BKG (min)", "Prix ORX / chambre", "Prix de vente TTC") \
+                                    and isinstance(val, (int, float)):
+                                # Prix sans decimales
+                                cell.value, cell.number_format = val, '#,##0 "EUR"'
                                 cell.alignment = Alignment(horizontal="right")
                             elif h in ("Travel Window", "Nb nuits"):
                                 cell.value     = val
