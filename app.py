@@ -42,7 +42,8 @@ ROW_COLORS = {
 }
 
 COL_WIDTHS = {
-    "Date de départ":                   16,
+    "Hotel":                            30,
+    "Travel Window":                    18,
     "Nb nuits":                         10,
     "Catégorie ORX":                    22,
     "Pension ORX (norm.)":              24,
@@ -57,6 +58,16 @@ COL_WIDTHS = {
     "Ecart EUR":                        13,
     "Ecart PCT":                        13,
 }
+
+PAGE_SIZES = [10, 25, 50, 100]
+
+# Noms de colonnes candidats pour le nom d'hotel dans l'export ORX
+HOTEL_COL_CANDIDATES = [
+    "Hôtel", "Hotel", "Nom hôtel", "Nom hotel",
+    "Nom de l'hôtel", "Nom de l'hotel",
+    "Etablissement", "Etablissement hôtelier",
+    "Libellé hôtel", "Libelle hotel",
+]
 
 
 # ══════════════════════════════════════════════════════════════
@@ -99,9 +110,13 @@ st.markdown("""
         overflow: hidden; margin: 6px 0 2px 0;
     }
     .tw-bar-fill { height: 100%; border-radius: 20px; transition: width .4s; }
-    .legend-wrap  { display: flex; gap: 18px; flex-wrap: wrap; margin: 8px 0 16px 0; align-items: center; }
+    .legend-wrap  { display: flex; gap: 18px; flex-wrap: wrap; margin: 8px 0 12px 0; align-items: center; }
     .legend-item  { display: flex; align-items: center; gap: 6px; font-size: 13px; }
     .legend-dot   { width: 14px; height: 14px; border-radius: 3px; flex-shrink: 0; border: 1px solid #ccc; }
+    .pagination-bar {
+        display: flex; align-items: center; justify-content: center;
+        gap: 12px; padding: 8px 0; font-size: 14px; color: #1F3864;
+    }
     .stTabs [data-baseweb="tab-list"] { gap: 2px; }
     .stTabs [data-baseweb="tab"] { padding: 8px 18px; border-radius: 5px 5px 0 0; }
 </style>
@@ -120,6 +135,14 @@ def safe_unique(df, col):
     if col not in df.columns:
         return []
     return sorted(df[col].dropna().astype(str).str.strip().unique().tolist())
+
+
+def detect_hotel_col(df):
+    """Retourne le nom de la première colonne hotel trouvée dans df, ou None."""
+    for c in HOTEL_COL_CANDIDATES:
+        if c in df.columns:
+            return c
+    return None
 
 
 def normalize_price(val):
@@ -153,12 +176,12 @@ def build_reverse_maps(pension_config, cancel_config):
 
 
 def compute_travel_window_coverage(df):
-    tw_cols     = ["Date de départ", "Nb nuits"]
+    tw_cols     = ["Travel Window", "Nb nuits"]
     all_windows = df[tw_cols].drop_duplicates().copy()
     all_windows["_has_bkg"] = all_windows.apply(
         lambda r: df[
-            (df["Date de départ"] == r["Date de départ"]) &
-            (df["Nb nuits"]       == r["Nb nuits"]) &
+            (df["Travel Window"] == r["Travel Window"]) &
+            (df["Nb nuits"]      == r["Nb nuits"]) &
             (df["Prix BKG (min)"].notna())
         ].shape[0] > 0,
         axis=1,
@@ -191,6 +214,103 @@ def kpi(label, value, cls=""):
     )
 
 
+def render_paginated_table(df_display, df_full, page_key, page_size_key):
+    """Affiche un tableau filtrable et paginé."""
+
+    # ── Filtres ──────────────────────────────────────────────
+    fc1, fc2, fc3 = st.columns([2, 2, 2])
+
+    with fc1:
+        hide_na = st.checkbox(
+            "Masquer les lignes sans comparaison BKG (N/A)",
+            value=False,
+            key="filter_hide_na",
+        )
+    with fc2:
+        hotel_options = ["Tous"] + sorted(df_display["Hotel"].dropna().unique().tolist()) \
+            if "Hotel" in df_display.columns else ["Tous"]
+        selected_hotel = st.selectbox("Filtrer par hôtel", hotel_options, key="filter_hotel")
+    with fc3:
+        tw_options = ["Toutes"] + sorted(df_display["Travel Window"].dropna().unique().tolist()) \
+            if "Travel Window" in df_display.columns else ["Toutes"]
+        selected_tw = st.selectbox("Filtrer par Travel Window", tw_options, key="filter_tw")
+
+    # ── Application des filtres ───────────────────────────────
+    mask = pd.Series([True] * len(df_display), index=df_display.index)
+    if hide_na:
+        mask &= df_full["_competitivite"] != "N/A"
+    if selected_hotel != "Tous" and "Hotel" in df_display.columns:
+        mask &= df_display["Hotel"] == selected_hotel
+    if selected_tw != "Toutes" and "Travel Window" in df_display.columns:
+        mask &= df_display["Travel Window"] == selected_tw
+
+    df_view      = df_display[mask]
+    df_view_full = df_full[mask]
+    n_rows       = len(df_view)
+
+    # ── Pagination ────────────────────────────────────────────
+    ps_col, _, info_col = st.columns([2, 4, 2])
+    with ps_col:
+        page_size = st.selectbox("Lignes par page", PAGE_SIZES, index=1, key=page_size_key)
+    with info_col:
+        st.markdown(
+            f"<div style='padding-top:28px;text-align:right;font-size:13px;color:#666;'>"
+            f"{n_rows:,} ligne(s)</div>",
+            unsafe_allow_html=True,
+        )
+
+    n_pages = max(1, (n_rows - 1) // page_size + 1)
+
+    if page_key not in st.session_state:
+        st.session_state[page_key] = 0
+    if st.session_state[page_key] >= n_pages:
+        st.session_state[page_key] = 0
+
+    btn1, btn2, btn3 = st.columns([1, 4, 1])
+    with btn1:
+        if st.button("← Préc.", key=f"{page_key}_prev",
+                     disabled=st.session_state[page_key] == 0):
+            st.session_state[page_key] -= 1
+            st.rerun()
+    with btn2:
+        st.markdown(
+            f'<div class="pagination-bar">'
+            f'Page <b>{st.session_state[page_key] + 1}</b> / <b>{n_pages}</b>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+    with btn3:
+        if st.button("Suiv. →", key=f"{page_key}_next",
+                     disabled=st.session_state[page_key] == n_pages - 1):
+            st.session_state[page_key] += 1
+            st.rerun()
+
+    start     = st.session_state[page_key] * page_size
+    end       = start + page_size
+    df_page   = df_view.iloc[start:end]
+    df_p_full = df_view_full.iloc[start:end]
+
+    def style_row(row):
+        comp  = df_p_full.at[row.name, "_competitivite"]
+        color = ROW_COLORS.get(comp, ("", ""))[1]
+        return [f"background-color: {color}" if color else ""] * len(row)
+
+    st.dataframe(
+        df_page.style.apply(style_row, axis=1).format(
+            {
+                "Ecart PCT":          "{:.2%}",
+                "Ecart EUR":          "{:+,.2f}",
+                "Prix BKG (min)":     "{:,.2f}",
+                "Prix ORX / chambre": "{:,.2f}",
+            },
+            na_rep="—",
+        ),
+        use_container_width=True,
+        hide_index=True,
+        height=min(52 + page_size * 35, 700),
+    )
+
+
 @st.cache_data(show_spinner="Lecture du fichier...")
 def load_data(file_bytes):
     xls      = pd.ExcelFile(io.BytesIO(file_bytes))
@@ -207,8 +327,6 @@ def load_data(file_bytes):
 
 # ══════════════════════════════════════════════════════════════
 # ÉTAPE 0 — CHARGEMENT
-# GUARD 1 : uploaded is None  → message + on s'arrête
-# GUARD 2 : erreur de lecture → message + on s'arrête (try/except/else)
 # ══════════════════════════════════════════════════════════════
 
 step_title(0, "Chargement du fichier Excel")
@@ -219,7 +337,6 @@ uploaded = st.file_uploader(
 )
 
 if uploaded is None:
-    # ── Aucun fichier : on affiche le message et on ne fait RIEN d'autre
     st.info("👆 Chargez votre fichier Excel pour démarrer la configuration.")
 
 else:
@@ -228,11 +345,11 @@ else:
     try:
         df_orx, df_bkg = load_data(file_bytes)
     except Exception as e:
-        # ── Lecture échouée : on affiche l'erreur et on ne fait RIEN d'autre
         st.error(f"❌ Erreur de lecture : {e}")
 
     else:
-        # ── Tout est OK : le reste de l'app s'exécute ici
+        hotel_col = detect_hotel_col(df_orx)
+
         orx_categories     = safe_unique(df_orx, "Catégorie")
         orx_pensions_raw   = safe_unique(df_orx, "Pension")
         bkg_room_types     = safe_unique(df_bkg, "Room Type")
@@ -242,11 +359,11 @@ else:
         c1, c2 = st.columns(2)
         c1.success(f"✅ ORX — {len(df_orx):,} lignes · {len(orx_categories)} catégorie(s) · {len(orx_pensions_raw)} libellé(s) pension")
         c2.success(f"✅ BKG — {len(df_bkg):,} lignes · {len(bkg_room_types)} type(s) de chambre · {len(bkg_cancel_raw)} politique(s) d'annulation")
+        if hotel_col:
+            st.caption(f"🏨 Colonne hôtel détectée : **{hotel_col}**")
+        else:
+            st.warning("⚠️ Colonne hôtel non détectée dans l'export ORX — la colonne 'Hotel' sera vide.")
         st.markdown("---")
-
-        # ══════════════════════════════════════════════════════
-        # ONGLETS
-        # ══════════════════════════════════════════════════════
 
         tab_params, tab_rooms, tab_pensions, tab_cancel, tab_report = st.tabs([
             "⚙️  1 · Paramètres",
@@ -256,16 +373,12 @@ else:
             "📊  5 · Rapport",
         ])
 
-        # ══════════════════════════════════════════════════════
-        # ONGLET 1 — PARAMÈTRES
-        # ══════════════════════════════════════════════════════
-
+        # ── ONGLET 1 ──────────────────────────────────────────
         with tab_params:
             step_title(1, "Paramètres de benchmark")
             col_a, col_b = st.columns([1, 1], gap="large")
             with col_a:
                 st.markdown("**Politique d'annulation de référence**")
-                st.caption("Politique retenue pour la comparaison tarifaire principale.")
                 ref_policy = st.selectbox(
                     "ref_policy", options=ANNULATIONS_NORM,
                     index=ANNULATIONS_NORM.index("RF - Remboursable"),
@@ -301,10 +414,7 @@ else:
                 "seuil_tres_competitif": seuil_tres_competitif,
             }
 
-        # ══════════════════════════════════════════════════════
-        # ONGLET 2 — TYPES DE CHAMBRES
-        # ══════════════════════════════════════════════════════
-
+        # ── ONGLET 2 ──────────────────────────────────────────
         with tab_rooms:
             step_title(2, "Mapping — Types de chambres")
             st.caption("Pour chaque catégorie ORX, associez un ou plusieurs types de chambres Booking.")
@@ -321,21 +431,13 @@ else:
                        for c, rts in room_mapping.items() for rt in rts]
             if preview:
                 st.markdown("---")
-                st.markdown("**Aperçu du mapping :**")
                 st.dataframe(pd.DataFrame(preview), hide_index=True, use_container_width=True)
             else:
                 st.warning("⚠️ Aucun mapping chambre défini — toutes les lignes seront N/A.")
 
-        # ══════════════════════════════════════════════════════
-        # ONGLET 3 — PENSIONS / MEAL PLANS
-        # ══════════════════════════════════════════════════════
-
+        # ── ONGLET 3 ──────────────────────────────────────────
         with tab_pensions:
             step_title(3, "Mapping — Pensions / Meal Plans")
-            st.caption(
-                "Pour chaque valeur normalisée, associez les libellés bruts "
-                "détectés dans les colonnes Pension (ORX) et Meal Plan (BKG)."
-            )
             st.markdown("")
             pension_config = {}
             for norm in PENSIONS_NORM:
@@ -360,18 +462,11 @@ else:
             if unmapped_orx_p:
                 st.warning(f"⚠️ Libellés ORX non mappés : {', '.join(unmapped_orx_p)}")
             if unmapped_bkg_m:
-                st.warning(f"⚠️ Libellés BKG (Meal Plan) non mappés : {', '.join(unmapped_bkg_m)}")
+                st.warning(f"⚠️ Libellés BKG non mappés : {', '.join(unmapped_bkg_m)}")
 
-        # ══════════════════════════════════════════════════════
-        # ONGLET 4 — POLITIQUES D'ANNULATION
-        # ══════════════════════════════════════════════════════
-
+        # ── ONGLET 4 ──────────────────────────────────────────
         with tab_cancel:
             step_title(4, "Mapping — Politiques d'annulation")
-            st.caption(
-                "Pour chaque valeur normalisée, associez les libellés bruts "
-                "détectés dans la colonne Cancellation Policy (BKG)."
-            )
             st.markdown("")
             cancel_config = {}
             for norm in ANNULATIONS_NORM:
@@ -387,15 +482,12 @@ else:
             if unmapped_bkg_c:
                 st.warning(f"⚠️ Politiques BKG non mappées : {', '.join(unmapped_bkg_c)}")
 
-        # ══════════════════════════════════════════════════════
-        # ONGLET 5 — RAPPORT
-        # ══════════════════════════════════════════════════════
-
+        # ── ONGLET 5 ──────────────────────────────────────────
         with tab_report:
             step_title(5, "Rapport de compétitivité")
             missing_room_cats = [c for c, v in room_mapping.items() if not v]
             if missing_room_cats:
-                st.warning(f"⚠️ Catégories sans mapping chambre : **{', '.join(missing_room_cats)}** — N/A.")
+                st.warning(f"⚠️ Catégories sans mapping chambre : **{', '.join(missing_room_cats)}**")
             st.markdown("")
             generate_btn = st.button("🚀 Générer le rapport", type="primary", use_container_width=True)
 
@@ -413,8 +505,16 @@ else:
 
                     for _, orx_row in df_orx_p.iterrows():
                         date_dep    = orx_row.get("Date de départ")
+                        nb_nuits    = orx_row.get("Nb nuits")
                         categorie   = str(orx_row.get("Catégorie", "")).strip()
                         pension_raw = str(orx_row.get("Pension", "")).strip()
+                        nom_hotel   = str(orx_row.get(hotel_col, "")).strip() if hotel_col else ""
+
+                        try:
+                            tw_label = date_dep.strftime("%d/%m/%Y") if date_dep else ""
+                        except Exception:
+                            tw_label = str(date_dep) if date_dep else ""
+
                         pension_norm     = orx_pension_rev.get(pension_raw, f"Non mappé : {pension_raw}")
                         prix_ttc_raw     = orx_row.get("Prix de vente TTC")
                         prix_orx_num     = normalize_price(prix_ttc_raw)
@@ -453,8 +553,9 @@ else:
                                     competitivite = "N/A"
 
                         results.append({
-                            "Date de départ":                   date_dep,
-                            "Nb nuits":                         orx_row.get("Nb nuits"),
+                            "Hotel":                            nom_hotel,
+                            "Travel Window":                    tw_label,
+                            "Nb nuits":                         nb_nuits,
                             "Catégorie ORX":                    categorie,
                             "Pension ORX (norm.)":              pension_norm,
                             "Type de prix":                     orx_row.get("Type de prix"),
@@ -487,7 +588,6 @@ else:
                 n_reussie = len(df_comp)
                 taux      = n_reussie / n_total if n_total else 0
 
-                # ── KPI 3 colonnes ────────────────────────────
                 st.markdown("---")
                 st.markdown("### Synthèse")
                 sc1, sc2, sc3 = st.columns(3, gap="medium")
@@ -535,14 +635,8 @@ else:
                 bar_w     = int(tw["rate"] * 100)
 
                 with st.container(border=True):
-                    st.markdown(
-                        '<div class="kpi-section-title">Couverture de la Travel Window</div>',
-                        unsafe_allow_html=True,
-                    )
-                    st.caption(
-                        "Pour chaque combinaison unique (Date de départ x Nb nuits) dans l'export ORX, "
-                        "vérifie si au moins une correspondance tarifaire BKG existe."
-                    )
+                    st.markdown('<div class="kpi-section-title">Couverture de la Travel Window</div>', unsafe_allow_html=True)
+                    st.caption("Pour chaque combinaison unique (Travel Window x Nb nuits), vérifie si au moins une correspondance BKG existe.")
                     tw1, tw2, tw3 = st.columns(3)
                     tw1.metric("Fenêtres tarifaires (total)",  f"{tw['total']:,}")
                     tw2.metric("Avec correspondance BKG",      f"{tw['covered']:,}")
@@ -558,10 +652,9 @@ else:
                     )
                     with st.expander("Détail par fenêtre tarifaire", expanded=False):
                         detail = tw["detail"].copy()
-                        detail["Statut"] = detail["_has_bkg"].map({True: "Couverte", False: "Manquante"})
-                        detail["Date de départ"] = detail["Date de départ"].astype(str)
+                        detail["Statut"] = detail["_has_bkg"].map({True: "✅ Couverte", False: "❌ Manquante"})
                         st.dataframe(
-                            detail[["Date de départ", "Nb nuits", "Statut"]],
+                            detail[["Travel Window", "Nb nuits", "Statut"]],
                             hide_index=True, use_container_width=True,
                         )
 
@@ -583,28 +676,9 @@ else:
                     unsafe_allow_html=True,
                 )
 
-                # ── TABLEAU ───────────────────────────────────
+                # ── TABLEAU PAGINÉ ────────────────────────────
                 df_display = df.drop(columns=["_competitivite"])
-
-                def style_row(row):
-                    comp  = df.at[row.name, "_competitivite"]
-                    color = ROW_COLORS.get(comp, ("", ""))[1]
-                    return [f"background-color: {color}" if color else ""] * len(row)
-
-                st.dataframe(
-                    df_display.style.apply(style_row, axis=1).format(
-                        {
-                            "Ecart PCT":          "{:.2%}",
-                            "Ecart EUR":          "{:+,.2f}",
-                            "Prix BKG (min)":     "{:,.2f}",
-                            "Prix ORX / chambre": "{:,.2f}",
-                        },
-                        na_rep="—",
-                    ),
-                    use_container_width=True,
-                    hide_index=True,
-                    height=500,
-                )
+                render_paginated_table(df_display, df, "report_page", "report_page_size")
 
                 # ── EXPORT EXCEL ──────────────────────────────
                 st.markdown("")
@@ -645,10 +719,7 @@ else:
                             elif h in ("Ecart EUR", "Prix BKG (min)", "Prix ORX / chambre") and isinstance(val, (int, float)):
                                 cell.value, cell.number_format = val, '#,##0.00 "EUR"'
                                 cell.alignment = Alignment(horizontal="right")
-                            elif h == "Date de départ":
-                                cell.value, cell.number_format = val, "DD/MM/YYYY"
-                                cell.alignment = Alignment(horizontal="center")
-                            elif h == "Nb nuits":
+                            elif h in ("Travel Window", "Nb nuits"):
                                 cell.value     = val
                                 cell.alignment = Alignment(horizontal="center")
                             else:
