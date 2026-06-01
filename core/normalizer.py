@@ -54,15 +54,40 @@ def normalize_price(val: object) -> float | None:
     return None
 
 
+def _type_de_prix_str(type_de_prix: object) -> str:
+    """
+    Convertit la valeur brute de 'Type de prix' en chaîne normalisée.
+    Gère tous les cas pathologiques issus de pandas :
+      - None, pd.NA, pd.NaT   → ""
+      - float("nan")          → ""
+      - int/float (1, 1.0)    → "1", "1.0"
+      - str ("1*", "2 pers")  → "1*", "2 pers"
+    """
+    if type_de_prix is None:
+        return ""
+    try:
+        if pd.isna(type_de_prix):  # type: ignore[arg-type]
+            return ""
+    except (TypeError, ValueError):
+        pass  # pd.isna peut lever TypeError sur certains types custom
+    return str(type_de_prix).strip()
+
+
 def orx_price_per_room(prix_ttc_raw: object, type_de_prix: object) -> float | None:
     """
     Convertit le prix ORX en prix par chambre (base 2 personnes).
-    Type 1* = par personne → x2 | Type 2* = par chambre → tel quel
+
+    Règle :
+      Type commence par "1"  (ex. "1*", "1 pers", 1, 1.0) → prix par personne → × 2
+      Tout autre cas                                        → prix par chambre → × 1
+
+    Le guard _type_de_prix_str() gère None, NaN, pd.NA et les valeurs numériques
+    lues par pandas depuis Excel (int 1 → "1", float 1.0 → "1.0").
     """
     prix = normalize_price(prix_ttc_raw)
     if prix is None:
         return None
-    type_str = str(type_de_prix).strip() if type_de_prix else ""
+    type_str = _type_de_prix_str(type_de_prix)
     return round(prix * 2, 2) if type_str.startswith("1") else prix
 
 
