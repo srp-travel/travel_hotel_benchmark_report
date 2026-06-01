@@ -94,15 +94,19 @@ def run_matching(
     params:          dict[str, float],
 ) -> tuple[pd.DataFrame, int, int]:
     """
-    Exécute le matching complet ORX↔BKG et retourne :
-      - df_result  : DataFrame résultat (colonnes affichage + _competitivite)
-      - n_no_map   : lignes sans mapping chambre
-      - n_no_bkg   : lignes sans prix BKG trouvé
+    Exécute le matching complet ORX↔BKG.
+
+    Colonnes produites (dans l'ordre) :
+      Hotel, Date de départ, Nb nuits, Catégorie ORX, Pension ORX (norm.),
+      Politique annulation ORX (réf.), Type de prix, Prix de vente TTC,
+      Prix ORX / chambre, Room Type BKG, Meal Plan BKG, Meal Plan BKG (norm.),
+      Politique annulation BKG (brut.),   ← valeur brute scraper
+      Politique annulation BKG (norm.),   ← valeur normalisée via mapping
+      Prix BKG (min), [Prix BKG Genius], Ecart EUR, Ecart PCT, _competitivite
 
     Si params["genius_decote"] > 0 :
-      - La colonne "Prix BKG Genius" est ajoutée au résultat
-      - L'écart est calculé sur le prix ajusté (prix_bkg × (1 - decote))
-      - "Prix BKG (min)" reste le prix brut scraped
+      - La colonne "Prix BKG Genius" est insérée après "Prix BKG (min)".
+      - L'écart est calculé sur le prix ajusté.
     """
     from core.scoring import get_competitiveness
 
@@ -145,16 +149,17 @@ def run_matching(
         room_types       = room_mapping.get(categorie, [])
 
         # Valeurs par défaut (cas sans correspondance)
-        nom_hotel:       str         = ""
-        bkg_room:        str         = "N/A"
-        bkg_meal:        str         = "N/A"
-        bkg_meal_norm:   str         = "N/A"
-        bkg_cancel_norm: str         = "N/A"
-        prix_bkg:        float | None = None
-        prix_bkg_genius: float | None = None
-        ecart_eur:       float | None = None
-        ecart_pct:       float | None = None
-        competitivite:   str         = "N/A"
+        nom_hotel:          str          = ""
+        bkg_room:           str          = "N/A"
+        bkg_meal:           str          = "N/A"
+        bkg_meal_norm:      str          = "N/A"
+        bkg_cancel_brut:    str          = "N/A"   # ← valeur brute scraper
+        bkg_cancel_norm:    str          = "N/A"   # ← valeur normalisée via mapping
+        prix_bkg:           float | None = None
+        prix_bkg_genius:    float | None = None
+        ecart_eur:          float | None = None
+        ecart_pct:          float | None = None
+        competitivite:      str          = "N/A"
 
         if not room_types:
             n_no_map += 1
@@ -166,22 +171,20 @@ def run_matching(
             if cheapest_row is None:
                 n_no_bkg += 1
             else:
-                nom_hotel          = scalar(cheapest_row, bkg_hotel_col).strip()
-                bkg_room           = scalar(cheapest_row, "Room Type")
-                bkg_meal           = scalar(cheapest_row, "Meal Plan")
-                bkg_meal_norm      = bkg_meal_rev.get(bkg_meal.strip(), f"Non mappé : {bkg_meal}")
-                bkg_cancel_raw_val = scalar(cheapest_row, "Cancellation Policy")
-                bkg_cancel_norm    = bkg_cancel_rev.get(
-                    bkg_cancel_raw_val, f"Non mappé : {bkg_cancel_raw_val}"
+                nom_hotel       = scalar(cheapest_row, bkg_hotel_col).strip()
+                bkg_room        = scalar(cheapest_row, "Room Type")
+                bkg_meal        = scalar(cheapest_row, "Meal Plan")
+                bkg_meal_norm   = bkg_meal_rev.get(bkg_meal.strip(), f"Non mappé : {bkg_meal}")
+                bkg_cancel_brut = scalar(cheapest_row, "Cancellation Policy")   # ← brut
+                bkg_cancel_norm = bkg_cancel_rev.get(
+                    bkg_cancel_brut, f"Non mappé : {bkg_cancel_brut}"
                 )
                 prix_bkg = get_float(cheapest_row, "Price")
 
                 if prix_bkg is not None:
-                    # _prix_compare garantit un float pour prix_bkg_compare — pas de None
                     prix_bkg_compare, prix_bkg_genius = _prix_compare(
                         prix_bkg, has_genius, genius_decote
                     )
-
                     if prix_orx_chambre is not None:
                         ecart_eur     = round(prix_orx_chambre - prix_bkg_compare, 2)
                         ecart_pct     = round(
@@ -202,7 +205,8 @@ def run_matching(
             "Room Type BKG":                       bkg_room,
             "Meal Plan BKG":                       bkg_meal,
             "Meal Plan BKG (norm.)":               bkg_meal_norm,
-            "Politique annulation BKG (norm.)":    bkg_cancel_norm,
+            "Politique annulation BKG (brut.)":    bkg_cancel_brut,   # ← brut
+            "Politique annulation BKG (norm.)":    bkg_cancel_norm,   # ← normalisée
             "Prix BKG (min)":                      prix_bkg,
             "Ecart EUR":                           ecart_eur,
             "Ecart PCT":                           ecart_pct,

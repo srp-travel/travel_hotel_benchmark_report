@@ -23,7 +23,6 @@ ANNULATIONS_NORM: list[str] = [
 ]
 
 # ── Compétitivité ──────────────────────────────────────────────────────────────
-# (label, classe CSS Streamlit, couleur hex fond)
 SEUIL_LABELS: list[tuple[str, str, str]] = [
     ("✅ Très compétitif", "success", "#C6EFCE"),
     ("✅ Compétitif",       "success", "#E2EFDA"),
@@ -31,15 +30,12 @@ SEUIL_LABELS: list[tuple[str, str, str]] = [
     ("❌ Non compétitif",   "danger",  "#FFC7CE"),
 ]
 
-# Seuils de compétitivité par défaut (modifiables dans l'onglet Paramètres)
-DEFAULT_SEUIL_PROCHE:          int = -10   # %
-DEFAULT_SEUIL_COMPETITIF:      int = -15   # %
-DEFAULT_SEUIL_TRES_COMPETITIF: int = -20   # %
+DEFAULT_SEUIL_PROCHE:          int = -10
+DEFAULT_SEUIL_COMPETITIF:      int = -15
+DEFAULT_SEUIL_TRES_COMPETITIF: int = -20
+DEFAULT_GENIUS_DECOTE:         int = 0
 
-# Décote Genius par défaut — 0 = désactivée
-DEFAULT_GENIUS_DECOTE: int = 0   # %
-
-# ── Couleurs de fond par niveau (hex Excel, hex HTML) ─────────────────────────
+# ── Couleurs ───────────────────────────────────────────────────────────────────
 ROW_COLORS: dict[str, tuple[str, str]] = {
     "✅ Très compétitif": ("C6EFCE", "#C6EFCE"),
     "✅ Compétitif":       ("E2EFDA", "#E2EFDA"),
@@ -48,7 +44,7 @@ ROW_COLORS: dict[str, tuple[str, str]] = {
     "N/A":                 ("F2F2F2", "#F2F2F2"),
 }
 
-# ── Largeurs colonnes Excel (caractères) ──────────────────────────────────────
+# ── Largeurs colonnes Excel ────────────────────────────────────────────────────
 COL_WIDTHS: dict[str, int] = {
     "Date de départ":                      16,
     "Nb nuits":                            10,
@@ -61,6 +57,7 @@ COL_WIDTHS: dict[str, int] = {
     "Room Type BKG":                       40,
     "Meal Plan BKG":                       36,
     "Meal Plan BKG (norm.)":               26,
+    "Politique annulation BKG (brut.)":    36,
     "Politique annulation BKG (norm.)":    38,
     "Prix BKG (min)":                      16,
     "Prix BKG Genius":                     18,
@@ -71,7 +68,7 @@ COL_WIDTHS: dict[str, int] = {
 # ── Pagination ─────────────────────────────────────────────────────────────────
 PAGE_SIZES: list[int] = [10, 25, 50, 100]
 
-# ── Feuilles Excel attendues ───────────────────────────────────────────────────
+# ── Feuilles Excel ─────────────────────────────────────────────────────────────
 SHEET_ORX:    str = "1. INPUT ORX EXPORT"
 SHEET_BKG:    str = "2. OUTPUT BKG SCRAP"
 SHEET_REPORT: str = "4. RAPPORT DETAILLE"
