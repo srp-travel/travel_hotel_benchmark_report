@@ -1,6 +1,7 @@
 """
 matcher.py — Construction de l'index BKG et matching ORX↔BKG.
 Logique O(1) par lookup via dict pré-indexé.
+Supporte la décote Genius : prix BKG ajusté avant calcul d'écart.
 Aucune dépendance Streamlit.
 """
 
@@ -8,7 +9,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from core.normalizer import row_get, scalar, get_float, orx_price_per_room
+from core.normalizer import get_float, orx_price_per_room, row_get, scalar
 
 
 # Type alias pour l'index BKG
@@ -39,14 +40,14 @@ def build_bkg_index(df_bkg: pd.DataFrame, bkg_meal_rev: dict[str, str]) -> BkgIn
 
 
 def find_cheapest_bkg(
-    bkg_index:    BkgIndex,
-    date:         object,
-    meal_norm:    str,
-    room_types:   list[str],
+    bkg_index:  BkgIndex,
+    date:       object,
+    meal_norm:  str,
+    room_types: list[str],
 ) -> pd.Series | None:
     """
-    Retourne la ligne BKG la moins chère pour la combinaison (date, meal_norm)
-    parmi les room_types autorisés. Retourne None si aucune correspondance.
+    Retourne la ligne BKG la moins chère parmi les room_types autorisés.
+    Retourne None si aucune correspondance.
     """
     cheapest: pd.Series | None = None
     cheapest_price = float("inf")
@@ -62,6 +63,26 @@ def find_cheapest_bkg(
     return cheapest
 
 
+def _apply_genius(prix_bkg: float, genius_decote: float) -> float:
+    """Applique la décote Genius au prix BKG brut. Retourne toujours un float."""
+    return round(prix_bkg * (1 - genius_decote), 2)
+
+
+def _prix_compare(
+    prix_bkg:      float,
+    has_genius:    bool,
+    genius_decote: float,
+) -> tuple[float, float | None]:
+    """
+    Retourne (prix_bkg_compare: float, prix_bkg_genius: float | None).
+    prix_bkg_compare est toujours un float — Pylance peut le narrower sans ambiguïté.
+    """
+    if has_genius:
+        genius = _apply_genius(prix_bkg, genius_decote)
+        return genius, genius
+    return prix_bkg, None
+
+
 def run_matching(
     df_orx:          pd.DataFrame,
     df_bkg:          pd.DataFrame,
@@ -74,11 +95,19 @@ def run_matching(
 ) -> tuple[pd.DataFrame, int, int]:
     """
     Exécute le matching complet ORX↔BKG et retourne :
-      - df_result       : DataFrame avec colonnes affichage + _competitivite
-      - n_no_map        : lignes sans mapping chambre
-      - n_no_bkg        : lignes sans prix BKG trouvé
+      - df_result  : DataFrame résultat (colonnes affichage + _competitivite)
+      - n_no_map   : lignes sans mapping chambre
+      - n_no_bkg   : lignes sans prix BKG trouvé
+
+    Si params["genius_decote"] > 0 :
+      - La colonne "Prix BKG Genius" est ajoutée au résultat
+      - L'écart est calculé sur le prix ajusté (prix_bkg × (1 - decote))
+      - "Prix BKG (min)" reste le prix brut scraped
     """
     from core.scoring import get_competitiveness
+
+    genius_decote: float = params.get("genius_decote", 0.0)
+    has_genius = genius_decote > 0
 
     # -- Parsing dates
     df_orx_p = df_orx.copy()
@@ -100,8 +129,8 @@ def run_matching(
     for _, orx_row in df_orx_p.iterrows():
         date_dep    = row_get(orx_row, "Date de départ")
         nb_nuits    = row_get(orx_row, "Nb nuits")
-        categorie   = str(row_get(orx_row, "Catégorie",   "") or "").strip()
-        pension_raw = str(row_get(orx_row, "Pension",     "") or "").strip()
+        categorie   = str(row_get(orx_row, "Catégorie", "") or "").strip()
+        pension_raw = str(row_get(orx_row, "Pension",   "") or "").strip()
 
         pension_norm       = orx_pension_rev.get(pension_raw, f"Non mappé : {pension_raw}")
         pension_norm_valid = bool(pension_norm and not pension_norm.startswith("Non mappé"))
@@ -115,25 +144,27 @@ def run_matching(
         prix_orx_chambre = orx_price_per_room(prix_ttc_raw, row_get(orx_row, "Type de prix"))
         room_types       = room_mapping.get(categorie, [])
 
+        # Valeurs par défaut (cas sans correspondance)
+        nom_hotel:       str         = ""
+        bkg_room:        str         = "N/A"
+        bkg_meal:        str         = "N/A"
+        bkg_meal_norm:   str         = "N/A"
+        bkg_cancel_norm: str         = "N/A"
+        prix_bkg:        float | None = None
+        prix_bkg_genius: float | None = None
+        ecart_eur:       float | None = None
+        ecart_pct:       float | None = None
+        competitivite:   str         = "N/A"
+
         if not room_types:
             n_no_map += 1
-            nom_hotel = ""
-            bkg_room = bkg_meal = bkg_meal_norm = bkg_cancel_norm = "N/A"
-            prix_bkg: float | None  = None
-            ecart_eur: float | None = None
-            ecart_pct: float | None = None
-            competitivite = "N/A"
 
         else:
-            meal_key       = pension_norm if pension_norm_valid else ""
-            cheapest_row   = find_cheapest_bkg(bkg_index, date_dep, meal_key, room_types)
+            meal_key     = pension_norm if pension_norm_valid else ""
+            cheapest_row = find_cheapest_bkg(bkg_index, date_dep, meal_key, room_types)
 
             if cheapest_row is None:
                 n_no_bkg += 1
-                nom_hotel = ""
-                bkg_room = bkg_meal = bkg_meal_norm = bkg_cancel_norm = "N/A"
-                prix_bkg = ecart_eur = ecart_pct = None
-                competitivite = "N/A"
             else:
                 nom_hotel          = scalar(cheapest_row, bkg_hotel_col).strip()
                 bkg_room           = scalar(cheapest_row, "Room Type")
@@ -145,15 +176,20 @@ def run_matching(
                 )
                 prix_bkg = get_float(cheapest_row, "Price")
 
-                if prix_orx_chambre is not None and prix_bkg is not None:
-                    ecart_eur     = round(prix_orx_chambre - prix_bkg, 2)
-                    ecart_pct     = round((prix_orx_chambre - prix_bkg) / prix_bkg, 4)
-                    competitivite = get_competitiveness(ecart_pct, params)
-                else:
-                    ecart_eur = ecart_pct = None
-                    competitivite = "N/A"
+                if prix_bkg is not None:
+                    # _prix_compare garantit un float pour prix_bkg_compare — pas de None
+                    prix_bkg_compare, prix_bkg_genius = _prix_compare(
+                        prix_bkg, has_genius, genius_decote
+                    )
 
-        results.append({
+                    if prix_orx_chambre is not None:
+                        ecart_eur     = round(prix_orx_chambre - prix_bkg_compare, 2)
+                        ecart_pct     = round(
+                            (prix_orx_chambre - prix_bkg_compare) / prix_bkg_compare, 4
+                        )
+                        competitivite = get_competitiveness(ecart_pct, params)
+
+        row_result: dict[str, object] = {
             "Hotel":                               nom_hotel,
             "Date de départ":                      date_label,
             "Nb nuits":                            nb_nuits,
@@ -171,6 +207,21 @@ def run_matching(
             "Ecart EUR":                           ecart_eur,
             "Ecart PCT":                           ecart_pct,
             "_competitivite":                      competitivite,
-        })
+        }
 
-    return pd.DataFrame(results), n_no_map, n_no_bkg
+        # Colonne Genius insérée après "Prix BKG (min)" uniquement si décote active
+        if has_genius:
+            row_result["Prix BKG Genius"] = prix_bkg_genius
+
+        results.append(row_result)
+
+    df_result = pd.DataFrame(results)
+
+    # Réordonnancement : Prix BKG Genius après Prix BKG (min)
+    if has_genius and "Prix BKG Genius" in df_result.columns:
+        cols = list(df_result.columns)
+        cols.remove("Prix BKG Genius")
+        cols.insert(cols.index("Prix BKG (min)") + 1, "Prix BKG Genius")
+        df_result = df_result[cols]
+
+    return df_result, n_no_map, n_no_bkg

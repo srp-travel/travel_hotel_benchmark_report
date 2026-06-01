@@ -4,25 +4,41 @@ pagination.py — Tableau paginé avec filtres (date, nuits, N/A).
 
 from __future__ import annotations
 
+from typing import Any
+
 import pandas as pd
 import streamlit as st
 
 from config.constants import PAGE_SIZES, ROW_COLORS
-from core.normalizer import fmt_price, fmt_ecart
+from core.normalizer import fmt_ecart, fmt_price
+
+
+# Format par défaut — utilisé si aucun format_map n'est passé
+_DEFAULT_FORMAT: dict[str, Any] = {
+    "Ecart PCT":          "{:.1%}",
+    "Ecart EUR":          fmt_ecart,
+    "Prix BKG (min)":     fmt_price,
+    "Prix ORX / chambre": fmt_price,
+    "Prix de vente TTC":  fmt_price,
+}
 
 
 def render_paginated_table(
-    df_display: pd.DataFrame,
-    df_full:    pd.DataFrame,
+    df_display:     pd.DataFrame,
+    df_full:        pd.DataFrame,
     page_key:       str,
     page_size_key:  str,
+    format_map:     dict[str, Any] | None = None,
 ) -> None:
     """
     Affiche le tableau de résultats avec :
       - filtres : masquer N/A, date de départ, nb nuits
       - pagination configurable
       - coloration conditionnelle par ligne
+      - format_map optionnel (enrichi dynamiquement si décote Genius active)
     """
+    effective_format = {**_DEFAULT_FORMAT, **(format_map or {})}
+
     # ── Filtres ────────────────────────────────────────────────
     fc1, fc2, fc3 = st.columns([2, 2, 2])
 
@@ -106,11 +122,14 @@ def render_paginated_table(
             st.session_state[page_key] += 1
             st.rerun()
 
-    # ── Affichage de la page courante ─────────────────────────
+    # ── Affichage de la page courante ──────────────────────────
     start     = st.session_state[page_key] * page_size
     end       = start + page_size
     df_page   = df_view.iloc[start:end]
     df_p_full = df_view_full.iloc[start:end]
+
+    # Applique uniquement les colonnes présentes dans df_page
+    active_format = {k: v for k, v in effective_format.items() if k in df_page.columns}
 
     def style_row(row: pd.Series) -> list[str]:  # type: ignore[type-arg]
         comp  = df_p_full.at[row.name, "_competitivite"]
@@ -118,15 +137,7 @@ def render_paginated_table(
         return [f"background-color: {color}" if color else ""] * len(row)
 
     st.dataframe(
-        df_page.style.apply(style_row, axis=1).format(
-            {
-                "Ecart PCT":          "{:.1%}",
-                "Ecart EUR":          fmt_ecart,
-                "Prix BKG (min)":     fmt_price,
-                "Prix ORX / chambre": fmt_price,
-                "Prix de vente TTC":  fmt_price,
-            }
-        ),
+        df_page.style.apply(style_row, axis=1).format(active_format),
         use_container_width=True,
         hide_index=True,
         height=min(52 + page_size * 36, 720),
