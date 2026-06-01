@@ -1,9 +1,7 @@
-"""
-scoring.py — Calcul des niveaux de compétitivité et de la couverture des dates.
-Aucune dépendance Streamlit.
-"""
 
 from __future__ import annotations
+
+from typing import Any
 
 import pandas as pd
 
@@ -27,16 +25,76 @@ def get_competitiveness(pct: float | None, params: dict[str, float]) -> str:
     return "❌ Non compétitif"
 
 
-def compute_date_coverage(df: pd.DataFrame) -> dict[str, object]:
+def compute_raw_date_coverage(
+    df_orx: pd.DataFrame,
+    df_bkg: pd.DataFrame,
+) -> dict[str, Any]:
     """
-    Analyse la couverture BKG par combinaison (Date de départ x Nb nuits).
-    Retourne un dict avec total, covered, missing, rate, detail.
+    Couverture BRUTE Travel Window : dates de départ ORX vs Check-in BKG,
+    avant tout mapping chambre/pension.
+
+    Répond à : "Le scraping BKG couvre-t-il les bonnes dates ?"
+
+    Retourne un dict :
+      - orx_total    : nb de dates uniques dans ORX
+      - bkg_total    : nb de dates uniques dans BKG
+      - covered      : nb de dates ORX présentes dans BKG
+      - missing      : nb de dates ORX absentes de BKG
+      - extra_bkg    : nb de dates BKG sans correspondance ORX
+      - rate         : taux de couverture (covered / orx_total)
+      - detail       : DataFrame (date, statut, nb_lignes_bkg)
+      - missing_dates: liste des dates manquantes formatées jj/mm/aaaa
+    """
+    orx_dates_raw = pd.to_datetime(df_orx["Date de départ"], errors="coerce").dt.date
+    bkg_dates_raw = pd.to_datetime(df_bkg["Check-in"],       errors="coerce").dt.date
+
+    orx_unique = sorted(orx_dates_raw.dropna().unique())
+    bkg_set    = set(bkg_dates_raw.dropna().unique())
+    bkg_unique = sorted(bkg_set)
+
+    # Compte du nb de lignes BKG par date (toutes chambres/pensions confondues)
+    # Annotation Any pour éviter l'incompatibilité dict[Hashable, int] vs dict[object, int]
+    bkg_counts: dict[Any, int] = bkg_dates_raw.dropna().value_counts().to_dict()
+
+    covered   = [d for d in orx_unique if d in bkg_set]
+    missing   = [d for d in orx_unique if d not in bkg_set]
+    extra_bkg = [d for d in bkg_unique if d not in set(orx_unique)]
+
+    n_total   = len(orx_unique)
+    n_covered = len(covered)
+    rate      = n_covered / n_total if n_total else 0.0
+
+    detail = pd.DataFrame({
+        "Date de départ ORX": [d.strftime("%d/%m/%Y") for d in orx_unique],
+        "Statut": [
+            "✅ Présente dans BKG" if d in bkg_set else "❌ Absente du BKG"
+            for d in orx_unique
+        ],
+        "Nb lignes BKG dispo": [int(bkg_counts.get(d, 0)) for d in orx_unique],
+    })
+
+    return {
+        "orx_total":     n_total,
+        "bkg_total":     len(bkg_unique),
+        "covered":       n_covered,
+        "missing":       len(missing),
+        "extra_bkg":     len(extra_bkg),
+        "rate":          rate,
+        "detail":        detail,
+        "missing_dates": [d.strftime("%d/%m/%Y") for d in missing],
+    }
+
+
+def compute_date_coverage(df: pd.DataFrame) -> dict[str, Any]:
+    """
+    Couverture ENRICHIE (post-génération) : par combinaison (Date de départ x Nb nuits),
+    vérifie si une correspondance BKG avec mapping complet (chambre + pension) existe.
     Complexité O(n) via set de lookup.
     """
     key_cols    = ["Date de départ", "Nb nuits"]
     all_windows = df[key_cols].drop_duplicates().copy()
 
-    covered_keys: set[tuple[object, object]] = set(
+    covered_keys: set[tuple[Any, Any]] = set(
         zip(
             df.loc[df["Prix BKG (min)"].notna(), "Date de départ"],
             df.loc[df["Prix BKG (min)"].notna(), "Nb nuits"],
