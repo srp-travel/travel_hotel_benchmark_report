@@ -105,8 +105,13 @@ def render() -> None:
         st.markdown(_card.format(
             icon="📋", title="Étape 5 — Mappez les annulations",
             body=(
-                "Normalisez les politiques d'annulation BKG "
-                "(ex. <i>Free cancellation → AG</i>).<br>"
+                "Cet onglet regroupe <b>deux configurations liées à l'annulation</b> :<br><br>"
+                "<b>① Politique de référence ORX</b> — sélectionnez la politique normalisée "
+                "qui représente votre offre Orchestra "
+                "(ex. <i>NANR — Non annulable / Non remboursable</i>). "
+                "Elle apparaît dans la colonne <i>Politique annulation ORX (réf.)</i> du rapport.<br><br>"
+                "<b>② Mapping BKG → normalisé</b> — normalisez les libellés bruts Booking "
+                "(ex. <i>Annulation gratuite avant le 16 juin → AG</i>).<br>"
                 "Le rapport affiche deux colonnes côte à côte :<br>"
                 "<ul style='margin:6px 0 0 16px;'>"
                 "<li><b>Politique annulation BKG (brut.)</b> — valeur exacte scraped</li>"
@@ -133,9 +138,12 @@ def render() -> None:
 <div style="background:#F0FFF4;border:1px solid #B7EBD0;border-radius:10px;
             padding:14px 20px;margin-top:4px;">
     <div style="font-size:14px;color:#375623;">
-        💡 <b>Astuce</b> — Le rapport est <b>persistant</b> : naviguez librement
-        entre les onglets sans perdre vos résultats. Cliquez sur <i>Générer</i>
-        à nouveau uniquement si vous modifiez un mapping ou un seuil.
+        💡 <b>Astuce — Sauvegarde du mapping</b> : utilisez la barre <i>💾 Sauvegarder la config</i>
+        (au-dessus des onglets) pour exporter votre mapping en JSON et le recharger lors d'une
+        prochaine session sans tout reconfigurer.<br><br>
+        Le rapport est <b>persistant</b> : naviguez librement entre les onglets sans perdre
+        vos résultats. Cliquez sur <i>Générer</i> à nouveau uniquement si vous modifiez
+        un mapping ou un seuil.
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -178,7 +186,7 @@ def render() -> None:
         ("Nb nuits",                           "ORX",  "Durée du séjour"),
         ("Catégorie ORX",                      "ORX",  "Catégorie de chambre Orchestra"),
         ("Pension ORX (norm.)",                "ORX",  "Pension normalisée (PDJ, DP, PC, TI, LS)"),
-        ("Politique annulation ORX (réf.)",    "ORX",  "Politique de référence choisie dans Paramètres"),
+        ("Politique annulation ORX (réf.)",    "ORX",  "Politique de référence choisie dans l'onglet Annulation"),
         ("Type de prix",                       "ORX",  "1* = par personne, 2* = par chambre"),
         ("Prix de vente TTC",                  "ORX",  "Prix brut de la feuille ORX"),
         ("Prix ORX / chambre",                 "ORX",  "Prix converti en base chambre 2 personnes"),

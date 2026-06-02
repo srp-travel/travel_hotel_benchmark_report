@@ -5,11 +5,13 @@ Les widgets ont des clés session_state explicites pour permettre la restauratio
 automatique depuis un fichier de config JSON (config_persistence.py).
 
 Clés exposées :
-  ref_policy_input    → selectbox politique d'annulation
   seuil_proche_input  → number_input seuil non compétitif / proche  (entier %)
   seuil_comp_input    → number_input seuil proche / compétitif       (entier %)
   seuil_tres_input    → number_input seuil compétitif / très comp.   (entier %)
   genius_input        → number_input décote Genius                   (entier %)
+
+Note : la politique d'annulation de référence ORX (ref_policy_input) est configurée
+dans l'onglet 4 — Mapping Annulation.
 """
 
 from __future__ import annotations
@@ -18,7 +20,6 @@ import pandas as pd
 import streamlit as st
 
 from config.constants import (
-    ANNULATIONS_NORM,
     DEFAULT_GENIUS_DECOTE,
     DEFAULT_SEUIL_PROCHE,
     DEFAULT_SEUIL_COMPETITIF,
@@ -37,17 +38,7 @@ def render() -> dict[str, float]:
     col_a, col_b = st.columns([1, 1], gap="large")
 
     with col_a:
-        st.markdown("**Politique d'annulation de référence ORX**")
-        ref_policy: str = st.selectbox(
-            "ref_policy",
-            options=ANNULATIONS_NORM,
-            key="ref_policy_input",            # ← clé session_state pour restauration
-            label_visibility="collapsed",
-        )
-        st.info(f"Référence ORX : **{ref_policy}**")
-
         # ── Décote Genius ──────────────────────────────────────
-        st.markdown("---")
         st.markdown("**Décote Genius BKG** *(% appliqué à tous les prix Booking)*")
         st.caption(
             "Simule le prix affiché aux membres Genius. "
@@ -106,9 +97,6 @@ def render() -> dict[str, float]:
         hide_index=True,
         use_container_width=True,
     )
-
-    # Stockage de la politique de référence pour tab_report
-    st.session_state["ref_policy"] = ref_policy
 
     return {
         "seuil_non_competitif":  seuil_proche         / 100,
