@@ -2,10 +2,11 @@
 tabs/__init__.py — Orchestration des onglets de l'application.
 
 Ordre de rendu :
-  1. Guide — toujours visible, avant le file uploader.
-  2. Couverture Travel Window brute — dès le chargement, avant tout mapping.
-  3. Onglets de configuration et rapport — après chargement seulement.
-  4. Couverture Travel Window enrichie — dans le rapport, après génération.
+  1. Guide             — toujours visible, avant le file uploader.
+  2. File uploader     — chargement du fichier Excel.
+  3. Couverture brute  — Travel Window avant mapping.
+  4. Config bar        — sauvegarde / restauration du mapping JSON.
+  5. Onglets           — configuration et rapport (après chargement).
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ import streamlit as st
 
 from core.data_loader import load_data, safe_unique
 from ui.components import render_footer, render_raw_coverage_block
+from ui.config_bar import render_config_bar
 from ui.tabs.tab_cancel import render as render_cancel
 from ui.tabs.tab_guide import render as render_guide
 from ui.tabs.tab_params import render as render_params
@@ -25,9 +27,7 @@ from ui.tabs.tab_rooms import render as render_rooms
 
 
 def render_all_tabs() -> None:
-    """
-    Point d'entrée principal de l'UI.
-    """
+    """Point d'entrée principal de l'UI."""
 
     # ── 1. GUIDE — toujours visible ───────────────────────────
     with st.expander("📖 Guide d'utilisation", expanded=False):
@@ -77,13 +77,18 @@ def render_all_tabs() -> None:
     )
     st.caption(f"🏨 Colonne hôtel (BKG col. 1) : **{bkg_hotel_col}**")
 
-    # ── 3. COUVERTURE BRUTE — avant tout mapping ───────────────
+    # ── 3. COUVERTURE BRUTE ────────────────────────────────────
     st.markdown("")
     render_raw_coverage_block(df_orx, df_bkg)
 
     st.markdown("---")
 
-    # ── 4. ONGLETS de configuration et rapport ─────────────────
+    # ── 4. BARRE DE CONFIG ────────────────────────────────────
+    render_config_bar()
+
+    st.markdown("---")
+
+    # ── 5. ONGLETS ────────────────────────────────────────────
     tab_params, tab_rooms, tab_pensions, tab_cancel, tab_report = st.tabs([
         "⚙️  1 · Paramètres",
         "🛏️  2 · Chambres",
@@ -105,8 +110,6 @@ def render_all_tabs() -> None:
         cancel_config = render_cancel(bkg_cancel_raw, pension_config)
 
     with tab_report:
-        # La couverture enrichie est rendue à l'intérieur de tab_report.py
-        # après génération du rapport (render_coverage_block(df)).
         render_report(
             df_orx=df_orx,
             df_bkg=df_bkg,

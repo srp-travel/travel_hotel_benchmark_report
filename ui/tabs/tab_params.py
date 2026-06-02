@@ -1,5 +1,15 @@
 """
 tab_params.py — Onglet 1 : Configuration des seuils de compétitivité et décote Genius.
+
+Les widgets ont des clés session_state explicites pour permettre la restauration
+automatique depuis un fichier de config JSON (config_persistence.py).
+
+Clés exposées :
+  ref_policy_input    → selectbox politique d'annulation
+  seuil_proche_input  → number_input seuil non compétitif / proche  (entier %)
+  seuil_comp_input    → number_input seuil proche / compétitif       (entier %)
+  seuil_tres_input    → number_input seuil compétitif / très comp.   (entier %)
+  genius_input        → number_input décote Genius                   (entier %)
 """
 
 from __future__ import annotations
@@ -21,12 +31,6 @@ def render() -> dict[str, float]:
     """
     Affiche le formulaire des paramètres.
     Retourne le dict `params` utilisé par run_matching() et get_competitiveness().
-
-    Clés retournées :
-      - seuil_non_competitif   : float (ex. -0.10)
-      - seuil_competitif       : float (ex. -0.15)
-      - seuil_tres_competitif  : float (ex. -0.20)
-      - genius_decote          : float (ex. 0.10 pour 10%)
     """
     step_title(1, "Paramètres de benchmark")
 
@@ -34,10 +38,10 @@ def render() -> dict[str, float]:
 
     with col_a:
         st.markdown("**Politique d'annulation de référence ORX**")
-        ref_policy = st.selectbox(
+        ref_policy: str = st.selectbox(
             "ref_policy",
             options=ANNULATIONS_NORM,
-            index=ANNULATIONS_NORM.index("RF - Remboursable"),
+            key="ref_policy_input",            # ← clé session_state pour restauration
             label_visibility="collapsed",
         )
         st.info(f"Référence ORX : **{ref_policy}**")
@@ -50,13 +54,14 @@ def render() -> dict[str, float]:
             "Un prix BKG de 100 € avec une décote de 10 % sera comparé à 90 €. "
             "Mettre 0 pour désactiver."
         )
-        genius_decote_pct = st.number_input(
+        genius_decote_pct: int = st.number_input(
             "genius_decote",
             value=DEFAULT_GENIUS_DECOTE,
             min_value=0,
             max_value=50,
             step=1,
             format="%d",
+            key="genius_input",                # ← clé session_state pour restauration
             label_visibility="collapsed",
         )
         genius_decote = genius_decote_pct / 100
@@ -71,31 +76,32 @@ def render() -> dict[str, float]:
         st.markdown("**Seuils de compétitivité** *(valeurs négatives en %)*")
         st.caption("Ecart = (Prix ORX - Prix BKG comparé) / Prix BKG comparé")
 
-        seuil_proche = st.number_input(
+        seuil_proche: int = st.number_input(
             "Seuil Non compétitif / Proche",
             value=DEFAULT_SEUIL_PROCHE,
             min_value=-99, max_value=0, step=1, format="%d",
-        ) / 100
-
-        seuil_competitif = st.number_input(
+            key="seuil_proche_input",          # ← clé session_state pour restauration
+        )
+        seuil_competitif: int = st.number_input(
             "Seuil Proche / Compétitif",
             value=DEFAULT_SEUIL_COMPETITIF,
             min_value=-99, max_value=0, step=1, format="%d",
-        ) / 100
-
-        seuil_tres_competitif = st.number_input(
+            key="seuil_comp_input",            # ← clé session_state pour restauration
+        )
+        seuil_tres_competitif: int = st.number_input(
             "Seuil Compétitif / Très compétitif",
             value=DEFAULT_SEUIL_TRES_COMPETITIF,
             min_value=-99, max_value=0, step=1, format="%d",
-        ) / 100
+            key="seuil_tres_input",            # ← clé session_state pour restauration
+        )
 
     st.markdown("---")
     st.dataframe(
         pd.DataFrame([
-            {"Indicateur": "❌ Non compétitif",  "Condition": f"Ecart > {int(seuil_proche*100)}%"},
-            {"Indicateur": "⚠️ Proche",          "Condition": f"{int(seuil_competitif*100)}% < Ecart ≤ {int(seuil_proche*100)}%"},
-            {"Indicateur": "✅ Compétitif",       "Condition": f"{int(seuil_tres_competitif*100)}% < Ecart ≤ {int(seuil_competitif*100)}%"},
-            {"Indicateur": "✅ Très compétitif",  "Condition": f"Ecart ≤ {int(seuil_tres_competitif*100)}%"},
+            {"Indicateur": "❌ Non compétitif",  "Condition": f"Ecart > {seuil_proche}%"},
+            {"Indicateur": "⚠️ Proche",          "Condition": f"{seuil_competitif}% < Ecart ≤ {seuil_proche}%"},
+            {"Indicateur": "✅ Compétitif",       "Condition": f"{seuil_tres_competitif}% < Ecart ≤ {seuil_competitif}%"},
+            {"Indicateur": "✅ Très compétitif",  "Condition": f"Ecart ≤ {seuil_tres_competitif}%"},
         ]),
         hide_index=True,
         use_container_width=True,
@@ -105,8 +111,8 @@ def render() -> dict[str, float]:
     st.session_state["ref_policy"] = ref_policy
 
     return {
-        "seuil_non_competitif":  float(seuil_proche),
-        "seuil_competitif":      float(seuil_competitif),
-        "seuil_tres_competitif": float(seuil_tres_competitif),
-        "genius_decote":         float(genius_decote),
+        "seuil_non_competitif":  seuil_proche         / 100,
+        "seuil_competitif":      seuil_competitif      / 100,
+        "seuil_tres_competitif": seuil_tres_competitif / 100,
+        "genius_decote":         genius_decote,
     }
